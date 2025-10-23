@@ -13,6 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 
 const AUTH_URL = 'https://functions.poehali.dev/936cc72c-61aa-45a4-b8e4-cb376df7cb14';
 const MESSENGER_URL = 'https://functions.poehali.dev/489d9652-52d6-436b-b062-b03e4d775184';
+const UPLOAD_URL = 'https://functions.poehali.dev/5cf25a27-90f0-443a-90df-3dacd2e18ad5';
 
 interface User {
   id: number;
@@ -29,6 +30,7 @@ interface Contact {
   display_name: string;
   avatar_url?: string;
   status?: string;
+  seconds_since_seen?: number;
 }
 
 interface Chat {
@@ -38,6 +40,7 @@ interface Chat {
   display_name: string;
   avatar_url?: string;
   status?: string;
+  seconds_since_seen?: number;
   last_message?: string;
 }
 
@@ -47,6 +50,7 @@ interface Message {
   message_text?: string;
   message_type: string;
   media_url?: string;
+  file_name?: string;
   is_read: boolean;
   sender_name: string;
 }
@@ -66,6 +70,7 @@ export default function Index() {
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserDisplayName, setNewUserDisplayName] = useState('');
   const [newUserIsAdmin, setNewUserIsAdmin] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -75,8 +80,17 @@ export default function Index() {
       if (user.is_admin) {
         loadAllUsers();
       }
+      
+      const interval = setInterval(() => {
+        loadChats();
+        if (selectedChat) {
+          loadMessages();
+        }
+      }, 3000);
+      
+      return () => clearInterval(interval);
     }
-  }, [user]);
+  }, [user, selectedChat]);
 
   useEffect(() => {
     if (selectedChat) {
@@ -233,6 +247,69 @@ export default function Index() {
     }
   };
 
+  const handleFileUpload = async (file: File, type: 'audio' | 'video' | 'photo' | 'file') => {
+    if (!user || !selectedChat) return;
+    
+    setUploadingFile(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target?.result as string;
+        
+        const uploadResponse = await fetch(UPLOAD_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_data: base64.split(',')[1],
+            file_name: file.name,
+            file_type: file.type
+          })
+        });
+        
+        const uploadData = await uploadResponse.json();
+        
+        if (uploadData.success) {
+          const messageResponse = await fetch(MESSENGER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'send_message',
+              sender_id: user.id,
+              receiver_id: selectedChat.contact_id,
+              message_text: file.name,
+              message_type: type,
+              media_url: uploadData.url
+            })
+          });
+          
+          const messageData = await messageResponse.json();
+          if (messageData.success) {
+            toast({ title: 'Файл отправлен!' });
+            loadMessages();
+            loadChats();
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      toast({ title: 'Ошибка', description: 'Не удалось загрузить файл', variant: 'destructive' });
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const formatLastSeen = (secondsSince?: number): string => {
+    if (!secondsSince || secondsSince < 60) return 'В сети';
+    
+    const minutes = Math.floor(secondsSince / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) return `${days}д назад`;
+    if (hours > 0) return `${hours}ч назад`;
+    return `${minutes}м назад`;
+  };
+
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -339,11 +416,16 @@ export default function Index() {
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-sm">{chat.display_name}</h3>
-                          {chat.status === 'online' && (
-                            <span className="w-2 h-2 bg-accent rounded-full"></span>
-                          )}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-semibold text-sm">{chat.display_name}</h3>
+                            {chat.status === 'online' && (
+                              <span className="w-2 h-2 bg-accent rounded-full"></span>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {formatLastSeen(chat.seconds_since_seen)}
+                          </span>
                         </div>
                         {chat.last_message && (
                           <p className="text-xs text-muted-foreground truncate">{chat.last_message}</p>
@@ -520,7 +602,7 @@ export default function Index() {
                 <div>
                   <h2 className="font-semibold">{selectedChat.display_name}</h2>
                   <p className="text-xs text-muted-foreground">
-                    {selectedChat.status === 'online' ? 'В сети' : 'Не в сети'}
+                    {formatLastSeen(selectedChat.seconds_since_seen)}
                   </p>
                 </div>
               </div>
@@ -542,18 +624,41 @@ export default function Index() {
                     >
                       {msg.message_type === 'text' && <p>{msg.message_text}</p>}
                       {msg.message_type === 'audio' && (
-                        <div className="flex items-center gap-2">
-                          <Icon name="Mic" size={16} />
-                          <span className="text-sm">Аудиосообщение</span>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <Icon name="Mic" size={16} />
+                            <span className="text-sm">Аудиосообщение</span>
+                          </div>
+                          {msg.media_url && (
+                            <audio controls className="max-w-full">
+                              <source src={msg.media_url} />
+                            </audio>
+                          )}
                         </div>
                       )}
-                      {(msg.message_type === 'photo' || msg.message_type === 'video') && (
-                        <div className="flex items-center gap-2">
-                          <Icon name={msg.message_type === 'photo' ? 'Image' : 'Video'} size={16} />
-                          <span className="text-sm">
-                            {msg.message_type === 'photo' ? 'Фото' : 'Видео'}
-                          </span>
+                      {msg.message_type === 'photo' && (
+                        <div className="flex flex-col gap-2">
+                          {msg.media_url && (
+                            <img src={msg.media_url} alt={msg.message_text} className="max-w-full rounded-lg" />
+                          )}
+                          <span className="text-xs">{msg.message_text}</span>
                         </div>
+                      )}
+                      {msg.message_type === 'video' && (
+                        <div className="flex flex-col gap-2">
+                          {msg.media_url && (
+                            <video controls className="max-w-full rounded-lg">
+                              <source src={msg.media_url} />
+                            </video>
+                          )}
+                          <span className="text-xs">{msg.message_text}</span>
+                        </div>
+                      )}
+                      {msg.message_type === 'file' && (
+                        <a href={msg.media_url} download className="flex items-center gap-2 hover:underline">
+                          <Icon name="File" size={16} />
+                          <span className="text-sm">{msg.message_text}</span>
+                        </a>
                       )}
                     </div>
                   </div>
@@ -563,10 +668,44 @@ export default function Index() {
 
             <div className="p-4 border-t border-border bg-card">
               <div className="flex gap-2">
-                <Button variant="outline" size="icon">
+                <input
+                  type="file"
+                  id="file-upload"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const type = file.type.startsWith('image/') ? 'photo' :
+                                   file.type.startsWith('video/') ? 'video' :
+                                   file.type.startsWith('audio/') ? 'audio' : 'file';
+                      handleFileUpload(file, type);
+                    }
+                  }}
+                />
+                <Button 
+                  variant="outline" 
+                  size="icon" 
+                  onClick={() => document.getElementById('file-upload')?.click()}
+                  disabled={uploadingFile}
+                >
                   <Icon name="Paperclip" size={18} />
                 </Button>
-                <Button variant="outline" size="icon">
+                <input
+                  type="file"
+                  id="audio-upload"
+                  accept="audio/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFileUpload(file, 'audio');
+                  }}
+                />
+                <Button 
+                  variant="outline" 
+                  size="icon"
+                  onClick={() => document.getElementById('audio-upload')?.click()}
+                  disabled={uploadingFile}
+                >
                   <Icon name="Mic" size={18} />
                 </Button>
                 <Textarea
@@ -574,6 +713,7 @@ export default function Index() {
                   onChange={(e) => setNewMessage(e.target.value)}
                   placeholder="Введите сообщение..."
                   className="min-h-[44px] max-h-[120px] resize-none flex-1"
+                  disabled={uploadingFile}
                   onKeyPress={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -581,7 +721,7 @@ export default function Index() {
                     }
                   }}
                 />
-                <Button onClick={handleSendMessage} size="icon">
+                <Button onClick={handleSendMessage} size="icon" disabled={uploadingFile}>
                   <Icon name="Send" size={18} />
                 </Button>
               </div>

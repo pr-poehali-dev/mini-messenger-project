@@ -54,7 +54,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 user = cur.fetchone()
                 
                 if user:
-                    cur.execute("UPDATE users SET status = 'online' WHERE id = %s", (user['id'],))
+                    cur.execute("UPDATE users SET status = 'online', last_seen = CURRENT_TIMESTAMP WHERE id = %s", (user['id'],))
                     conn.commit()
                     
                     return {
@@ -73,7 +73,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             
             elif action == 'logout':
                 user_id = body_data.get('user_id')
-                cur.execute("UPDATE users SET status = 'offline' WHERE id = %s", (user_id,))
+                cur.execute("UPDATE users SET status = 'offline', last_seen = CURRENT_TIMESTAMP WHERE id = %s", (user_id,))
                 conn.commit()
                 
                 return {

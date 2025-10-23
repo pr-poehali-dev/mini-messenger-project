@@ -8,8 +8,14 @@ Returns: HTTP response с данными чатов и сообщений
 import json
 import os
 from typing import Dict, Any
+from decimal import Decimal
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
+def decimal_to_float(obj):
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError
 
 def get_db_connection():
     return psycopg2.connect(os.environ['DATABASE_URL'])
@@ -117,7 +123,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 user_id = params.get('user_id')
                 
                 cur.execute(
-                    """SELECT u.id, u.login, u.display_name, u.avatar_url, u.status 
+                    """SELECT u.id, u.login, u.display_name, u.avatar_url, u.status,
+                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - u.last_seen)) as seconds_since_seen
                     FROM contacts c 
                     JOIN users u ON c.contact_user_id = u.id 
                     WHERE c.user_id = %s 
@@ -129,7 +136,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return {
                     'statusCode': 200,
                     'headers': headers,
-                    'body': json.dumps({'contacts': [dict(c) for c in contacts]}),
+                    'body': json.dumps({'contacts': [dict(c) for c in contacts]}, default=decimal_to_float),
                     'isBase64Encoded': False
                 }
             
@@ -140,6 +147,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     """SELECT DISTINCT ON (c.id) c.id as chat_id, 
                         CASE WHEN c.user1_id = %s THEN c.user2_id ELSE c.user1_id END as contact_id,
                         u.login, u.display_name, u.avatar_url, u.status,
+                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - u.last_seen)) as seconds_since_seen,
                         m.message_text as last_message
                     FROM chats c
                     JOIN users u ON (CASE WHEN c.user1_id = %s THEN c.user2_id ELSE c.user1_id END) = u.id
@@ -153,7 +161,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return {
                     'statusCode': 200,
                     'headers': headers,
-                    'body': json.dumps({'chats': [dict(c) for c in chats]}),
+                    'body': json.dumps({'chats': [dict(c) for c in chats]}, default=decimal_to_float),
                     'isBase64Encoded': False
                 }
             
