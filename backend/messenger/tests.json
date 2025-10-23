@@ -1,0 +1,31 @@
+{
+  "tests": [
+    {
+      "name": "Get contacts for user",
+      "method": "GET",
+      "path": "/?action=get_contacts&user_id=1",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "contacts": []
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Send message",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "send_message",
+        "sender_id": 1,
+        "receiver_id": 1,
+        "message_text": "Test message",
+        "message_type": "text"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "success": true
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
