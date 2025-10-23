@@ -1,0 +1,17 @@
+{
+  "name": "Messenger",
+  "short_name": "Messenger",
+  "description": "Мини-мессенджер с поддержкой оффлайн режима",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1E293B",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

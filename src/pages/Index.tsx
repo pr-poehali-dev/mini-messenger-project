@@ -22,6 +22,7 @@ interface User {
   is_admin: boolean;
   avatar_url?: string;
   status?: string;
+  custom_status?: string;
 }
 
 interface Contact {
@@ -30,6 +31,8 @@ interface Contact {
   display_name: string;
   avatar_url?: string;
   status?: string;
+  custom_status?: string;
+  is_admin?: boolean;
   seconds_since_seen?: number;
 }
 
@@ -40,8 +43,12 @@ interface Chat {
   display_name: string;
   avatar_url?: string;
   status?: string;
+  custom_status?: string;
+  is_admin?: boolean;
   seconds_since_seen?: number;
   last_message?: string;
+  is_typing?: boolean;
+  wallpaper_url?: string;
 }
 
 interface Message {
@@ -71,7 +78,26 @@ export default function Index() {
   const [newUserDisplayName, setNewUserDisplayName] = useState('');
   const [newUserIsAdmin, setNewUserIsAdmin] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [editProfileName, setEditProfileName] = useState('');
+  const [editProfileStatus, setEditProfileStatus] = useState('');
+  const [showWallpaperPicker, setShowWallpaperPicker] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('darkMode');
+    if (savedTheme === 'true') {
+      setIsDarkMode(true);
+      document.documentElement.classList.add('dark');
+    }
+    
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -310,6 +336,133 @@ export default function Index() {
     return `${minutes}м назад`;
   };
 
+  const handleTyping = async () => {
+    if (!user || !selectedChat) return;
+    
+    await fetch(MESSENGER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'set_typing',
+        user_id: user.id,
+        chat_id: selectedChat.chat_id,
+        is_typing: true
+      })
+    });
+  };
+
+  const handleStopTyping = async () => {
+    if (!user || !selectedChat) return;
+    
+    await fetch(MESSENGER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'set_typing',
+        user_id: user.id,
+        chat_id: selectedChat.chat_id,
+        is_typing: false
+      })
+    });
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const file = new File([blob], 'voice.webm', { type: 'audio/webm' });
+        await handleFileUpload(file, 'audio');
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+    } catch (error) {
+      toast({ title: 'Ошибка', description: 'Не удалось получить доступ к микрофону', variant: 'destructive' });
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+      setMediaRecorder(null);
+    }
+  };
+
+  const toggleDarkMode = () => {
+    const newMode = !isDarkMode;
+    setIsDarkMode(newMode);
+    localStorage.setItem('darkMode', String(newMode));
+    if (newMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  };
+
+  const handleUpdateProfile = async () => {
+    if (!user) return;
+    
+    try {
+      const response = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_profile',
+          user_id: user.id,
+          display_name: editProfileName || user.display_name,
+          avatar_url: user.avatar_url,
+          custom_status: editProfileStatus || user.custom_status
+        })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        setUser(data.user);
+        setShowProfileSettings(false);
+        toast({ title: 'Профиль обновлён!' });
+      }
+    } catch (error) {
+      toast({ title: 'Ошибка', description: 'Не удалось обновить профиль', variant: 'destructive' });
+    }
+  };
+
+  const handleSetWallpaper = async (wallpaperUrl: string) => {
+    if (!user || !selectedChat) return;
+    
+    try {
+      await fetch(MESSENGER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_wallpaper',
+          user_id: user.id,
+          chat_id: selectedChat.chat_id,
+          wallpaper_url: wallpaperUrl
+        })
+      });
+      
+      toast({ title: 'Обои установлены!' });
+      setShowWallpaperPicker(false);
+      loadChats();
+    } catch (error) {
+      toast({ title: 'Ошибка', description: 'Не удалось установить обои', variant: 'destructive' });
+    }
+  };
+
+  const showNotification = (title: string, body: string) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, { body, icon: '/favicon.svg' });
+    }
+  };
+
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -356,24 +509,73 @@ export default function Index() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
-      <div className="w-80 border-r border-border bg-card flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col md:flex-row">
+      <div className="w-full md:w-80 border-r border-border bg-card flex flex-col md:h-screen">
         <div className="p-4 border-b border-border">
           <div className="flex items-center gap-3">
-            <Avatar>
-              <AvatarFallback className="bg-primary text-primary-foreground">
-                {user.display_name[0].toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1">
-              <h2 className="font-semibold text-card-foreground">{user.display_name}</h2>
-              <p className="text-xs text-muted-foreground">{user.is_admin ? 'Администратор' : 'Пользователь'}</p>
+            <div className="relative cursor-pointer" onClick={() => setShowProfileSettings(true)}>
+              <Avatar>
+                {user.avatar_url ? (
+                  <img src={user.avatar_url} alt={user.display_name} className="w-full h-full object-cover" />
+                ) : (
+                  <AvatarFallback className="bg-primary text-primary-foreground">
+                    {user.display_name[0].toUpperCase()}
+                  </AvatarFallback>
+                )}
+              </Avatar>
             </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-1">
+                <h2 className="font-semibold text-card-foreground">{user.display_name}</h2>
+                {user.is_admin && (
+                  <Icon name="BadgeCheck" size={16} className="text-blue-500" />
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">{user.custom_status || 'В сети'}</p>
+            </div>
+            <Button variant="ghost" size="icon" onClick={toggleDarkMode}>
+              <Icon name={isDarkMode ? 'Sun' : 'Moon'} size={18} />
+            </Button>
             <Button variant="ghost" size="icon" onClick={handleLogout}>
               <Icon name="LogOut" size={18} />
             </Button>
           </div>
         </div>
+
+        <Dialog open={showProfileSettings} onOpenChange={setShowProfileSettings}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Настройки профиля</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-4">
+              <div>
+                <Label>Имя</Label>
+                <Input
+                  value={editProfileName || user.display_name}
+                  onChange={(e) => setEditProfileName(e.target.value)}
+                  placeholder="Введите имя"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Статус</Label>
+                <select
+                  value={editProfileStatus || user.custom_status || 'В сети'}
+                  onChange={(e) => setEditProfileStatus(e.target.value)}
+                  className="w-full mt-1 p-2 border rounded-md"
+                >
+                  <option value="В сети">В сети</option>
+                  <option value="Занята">Занята</option>
+                  <option value="Не в сети">Не в сети</option>
+                  <option value="В городе нет интернета, отвечу позже">В городе нет интернета, отвечу позже</option>
+                </select>
+              </div>
+              <Button onClick={handleUpdateProfile} className="w-full">
+                Сохранить
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Tabs defaultValue="chats" className="flex-1 flex flex-col">
           <TabsList className="w-full rounded-none">
@@ -427,9 +629,11 @@ export default function Index() {
                             {formatLastSeen(chat.seconds_since_seen)}
                           </span>
                         </div>
-                        {chat.last_message && (
+                        {chat.is_typing ? (
+                          <p className="text-xs text-accent italic">печатает...</p>
+                        ) : chat.last_message ? (
                           <p className="text-xs text-muted-foreground truncate">{chat.last_message}</p>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -592,23 +796,70 @@ export default function Index() {
       <div className="flex-1 flex flex-col">
         {selectedChat ? (
           <>
-            <div className="p-4 border-b border-border bg-card">
+            <div className="p-4 border-b border-border bg-card flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Avatar>
-                  <AvatarFallback className="bg-muted">
-                    {selectedChat.display_name[0].toUpperCase()}
-                  </AvatarFallback>
+                  {selectedChat.avatar_url ? (
+                    <img src={selectedChat.avatar_url} alt={selectedChat.display_name} className="w-full h-full object-cover" />
+                  ) : (
+                    <AvatarFallback className="bg-muted">
+                      {selectedChat.display_name[0].toUpperCase()}
+                    </AvatarFallback>
+                  )}
                 </Avatar>
                 <div>
-                  <h2 className="font-semibold">{selectedChat.display_name}</h2>
+                  <div className="flex items-center gap-1">
+                    <h2 className="font-semibold">{selectedChat.display_name}</h2>
+                    {selectedChat.is_admin && (
+                      <Icon name="BadgeCheck" size={16} className="text-blue-500" />
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    {formatLastSeen(selectedChat.seconds_since_seen)}
+                    {selectedChat.is_typing ? 'печатает...' : selectedChat.custom_status || formatLastSeen(selectedChat.seconds_since_seen)}
                   </p>
                 </div>
               </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowWallpaperPicker(true)}>
+                <Icon name="Image" size={18} />
+              </Button>
             </div>
 
-            <ScrollArea className="flex-1 p-4">
+            <Dialog open={showWallpaperPicker} onOpenChange={setShowWallpaperPicker}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Выбрать обои чата</DialogTitle>
+                </DialogHeader>
+                <div className="grid grid-cols-3 gap-4 pt-4">
+                  {['https://images.unsplash.com/photo-1557683316-973673baf926', 
+                    'https://images.unsplash.com/photo-1579546929518-9e396f3cc809',
+                    'https://images.unsplash.com/photo-1557682250-33bd709cbe85',
+                    '', 
+                  ].map((url, i) => (
+                    <div
+                      key={i}
+                      onClick={() => handleSetWallpaper(url)}
+                      className="cursor-pointer border-2 border-border hover:border-primary rounded-lg overflow-hidden aspect-square"
+                      style={{
+                        backgroundColor: url ? 'transparent' : '#f0f0f0',
+                        backgroundImage: url ? `url(${url})` : 'none',
+                        backgroundSize: 'cover'
+                      }}
+                    >
+                      {!url && <div className="w-full h-full flex items-center justify-center text-muted-foreground">Без обоев</div>}
+                    </div>
+                  ))}
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <ScrollArea 
+              className="flex-1 p-4" 
+              style={{
+                backgroundImage: selectedChat?.wallpaper_url ? `url(${selectedChat.wallpaper_url})` : 'none',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center'
+              }}
+            >
               <div className="space-y-4">
                 {messages.map((msg) => (
                   <div
@@ -703,14 +954,22 @@ export default function Index() {
                 <Button 
                   variant="outline" 
                   size="icon"
-                  onClick={() => document.getElementById('audio-upload')?.click()}
+                  onMouseDown={startVoiceRecording}
+                  onMouseUp={stopVoiceRecording}
+                  onTouchStart={startVoiceRecording}
+                  onTouchEnd={stopVoiceRecording}
                   disabled={uploadingFile}
+                  className={isRecording ? 'bg-red-500 text-white' : ''}
                 >
                   <Icon name="Mic" size={18} />
                 </Button>
                 <Textarea
                   value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
+                  onChange={(e) => {
+                    setNewMessage(e.target.value);
+                    handleTyping();
+                  }}
+                  onBlur={handleStopTyping}
                   placeholder="Введите сообщение..."
                   className="min-h-[44px] max-h-[120px] resize-none flex-1"
                   disabled={uploadingFile}
@@ -718,6 +977,7 @@ export default function Index() {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       handleSendMessage();
+                      handleStopTyping();
                     }
                   }}
                 />

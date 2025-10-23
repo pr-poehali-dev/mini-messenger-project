@@ -106,12 +106,54 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     (chat_id, sender_id, message_text, message_type, media_url)
                 )
                 message = cur.fetchone()
+                
+                cur.execute(
+                    "UPDATE typing_status SET is_typing = FALSE WHERE user_id = %s AND chat_id = %s",
+                    (sender_id, chat_id)
+                )
+                
                 conn.commit()
                 
                 return {
                     'statusCode': 200,
                     'headers': headers,
                     'body': json.dumps({'success': True, 'message_id': message['id']}),
+                    'isBase64Encoded': False
+                }
+            
+            elif action == 'set_typing':
+                user_id = body_data.get('user_id')
+                chat_id = body_data.get('chat_id')
+                is_typing = body_data.get('is_typing', False)
+                
+                cur.execute(
+                    "INSERT INTO typing_status (user_id, chat_id, is_typing, updated_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP) ON CONFLICT (user_id, chat_id) DO UPDATE SET is_typing = %s, updated_at = CURRENT_TIMESTAMP",
+                    (user_id, chat_id, is_typing, is_typing)
+                )
+                conn.commit()
+                
+                return {
+                    'statusCode': 200,
+                    'headers': headers,
+                    'body': json.dumps({'success': True}),
+                    'isBase64Encoded': False
+                }
+            
+            elif action == 'set_wallpaper':
+                user_id = body_data.get('user_id')
+                chat_id = body_data.get('chat_id')
+                wallpaper_url = body_data.get('wallpaper_url')
+                
+                cur.execute(
+                    "INSERT INTO chat_settings (user_id, chat_id, wallpaper_url) VALUES (%s, %s, %s) ON CONFLICT (user_id, chat_id) DO UPDATE SET wallpaper_url = %s",
+                    (user_id, chat_id, wallpaper_url, wallpaper_url)
+                )
+                conn.commit()
+                
+                return {
+                    'statusCode': 200,
+                    'headers': headers,
+                    'body': json.dumps({'success': True}),
                     'isBase64Encoded': False
                 }
         
@@ -123,7 +165,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 user_id = params.get('user_id')
                 
                 cur.execute(
-                    """SELECT u.id, u.login, u.display_name, u.avatar_url, u.status,
+                    """SELECT u.id, u.login, u.display_name, u.avatar_url, u.status, u.custom_status, u.is_admin,
                         EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - u.last_seen)) as seconds_since_seen
                     FROM contacts c 
                     JOIN users u ON c.contact_user_id = u.id 
@@ -146,15 +188,19 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 cur.execute(
                     """SELECT DISTINCT ON (c.id) c.id as chat_id, 
                         CASE WHEN c.user1_id = %s THEN c.user2_id ELSE c.user1_id END as contact_id,
-                        u.login, u.display_name, u.avatar_url, u.status,
+                        u.login, u.display_name, u.avatar_url, u.status, u.custom_status, u.is_admin,
                         EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - u.last_seen)) as seconds_since_seen,
-                        m.message_text as last_message
+                        m.message_text as last_message,
+                        ts.is_typing,
+                        cs.wallpaper_url
                     FROM chats c
                     JOIN users u ON (CASE WHEN c.user1_id = %s THEN c.user2_id ELSE c.user1_id END) = u.id
                     LEFT JOIN messages m ON m.chat_id = c.id
+                    LEFT JOIN typing_status ts ON ts.chat_id = c.id AND ts.user_id != %s
+                    LEFT JOIN chat_settings cs ON cs.chat_id = c.id AND cs.user_id = %s
                     WHERE c.user1_id = %s OR c.user2_id = %s
                     ORDER BY c.id, m.created_at DESC""",
-                    (user_id, user_id, user_id, user_id)
+                    (user_id, user_id, user_id, user_id, user_id, user_id)
                 )
                 chats = cur.fetchall()
                 

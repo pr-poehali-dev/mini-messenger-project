@@ -48,7 +48,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 password = body_data.get('password')
                 
                 cur.execute(
-                    "SELECT id, login, display_name, is_admin, avatar_url, status FROM users WHERE login = %s AND password = %s",
+                    "SELECT id, login, display_name, is_admin, avatar_url, status, custom_status FROM users WHERE login = %s AND password = %s",
                     (login, password)
                 )
                 user = cur.fetchone()
@@ -118,6 +118,27 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                         "UPDATE users SET display_name = %s WHERE id = %s RETURNING id, login, display_name, is_admin",
                         (display_name, user_id)
                     )
+                
+                updated_user = cur.fetchone()
+                conn.commit()
+                
+                return {
+                    'statusCode': 200,
+                    'headers': headers,
+                    'body': json.dumps({'success': True, 'user': dict(updated_user)}),
+                    'isBase64Encoded': False
+                }
+            
+            elif action == 'update_profile':
+                user_id = body_data.get('user_id')
+                display_name = body_data.get('display_name')
+                avatar_url = body_data.get('avatar_url')
+                custom_status = body_data.get('custom_status')
+                
+                cur.execute(
+                    "UPDATE users SET display_name = %s, avatar_url = %s, custom_status = %s WHERE id = %s RETURNING id, login, display_name, is_admin, avatar_url, custom_status",
+                    (display_name, avatar_url, custom_status, user_id)
+                )
                 
                 updated_user = cur.fetchone()
                 conn.commit()
